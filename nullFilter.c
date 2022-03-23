@@ -141,7 +141,7 @@ NTSTATUS MiniUnload(FLT_FILTER_UNLOAD_FLAGS Flags);
 FLT_POSTOP_CALLBACK_STATUS MiniPostCreate(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext, FLT_POST_OPERATION_FLAGS Flags);
 FLT_PREOP_CALLBACK_STATUS MiniPreCreate(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext);
 FLT_PREOP_CALLBACK_STATUS MiniPreWrite(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext);
-FLT_PREOP_CALLBACK_STATUS MiniPostRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext);
+FLT_PREOP_CALLBACK_STATUS MiniPreRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext);
 NTSTATUS PfltInstanceSetupCallback(
     __in PCFLT_RELATED_OBJECTS FltObjects,
     __in FLT_INSTANCE_SETUP_FLAGS Flags,
@@ -150,12 +150,12 @@ NTSTATUS PfltInstanceSetupCallback(
 );
 NTSTATUS Decrypt(PVOID EncryptedData, ULONG size, PVOID* Data, PULONG SizeOfBuffer);
 NTSTATUS Encrypt(PVOID Data, ULONG size, PVOID* EncryptedData, PULONG SizeOfBuffer);
-
+VOID PrintBuffer(PVOID buffer, int size);
 
 const FLT_OPERATION_REGISTRATION Callbacks[] = {
  {IRP_MJ_CREATE, 0, MiniPreCreate, MiniPostCreate},
  {IRP_MJ_WRITE, 0, MiniPreWrite, NULL},
- {IRP_MJ_READ, 0, NULL, MiniPostRead},
+ {IRP_MJ_READ, 0, MiniPreRead, NULL},
  {IRP_MJ_OPERATION_END}
 };
 
@@ -538,7 +538,7 @@ FLT_PREOP_CALLBACK_STATUS MiniPreWrite(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                     {
                         ioBuffer = (char*)Data->Iopb->Parameters.Write.WriteBuffer;
                     }
-                    KdPrint(("Write file: %ws blocked \r\n", Name));
+                    //KdPrint(("Write file: %ws blocked \r\n", Name));
 
                     if (ioBuffer != NULL)
                     {
@@ -546,7 +546,7 @@ FLT_PREOP_CALLBACK_STATUS MiniPreWrite(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                         ULONG SizeOfBuffer;
                         
                         
-                        KdPrint(("buffer - %s\n", Data->Iopb->Parameters.Write.WriteBuffer));
+                        //KdPrint(("buffer - %s\n", Data->Iopb->Parameters.Write.WriteBuffer));
                         
 
 
@@ -554,17 +554,40 @@ FLT_PREOP_CALLBACK_STATUS MiniPreWrite(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                         
                         
                         Encrypt(Data->Iopb->Parameters.Write.WriteBuffer, Data->Iopb->Parameters.Write.Length, &EncryptedBuffer, &SizeOfBuffer);
-                        KdPrint(("SizeOfBuffer - %lu\n", SizeOfBuffer));
-                        KdPrint(("buffer - %s\n", EncryptedBuffer));
+                        //KdPrint(("SizeOfBuffer - %lu\n", SizeOfBuffer));
+                        //KdPrint(("buffer - %s\n", EncryptedBuffer));
                        
                         
                         if (EncryptedBuffer != NULL)
                         {
+                            KdPrint(("Encrypted buffer is not null\n"));
+                            KdPrint(("Size of buffer - %lu\n",SizeOfBuffer));
+                            //RtlZeroMemory(Data->Iopb->Parameters.Write.WriteBuffer, Data->Iopb->Parameters.Write.Length);
                             Data->Iopb->Parameters.Write.Length = SizeOfBuffer;
-                            RtlCopyMemory(Data->Iopb->Parameters.Write.WriteBuffer, EncryptedBuffer, SizeOfBuffer);
-                            ExFreePool(EncryptedBuffer);
+                            Data->Iopb->Parameters.Write.ByteOffset.QuadPart=0;
+                            //Data->Iopb->Parameters.Write.WriteBuffer = "abc\0";
+                            /*PVOID newBuf = FltAllocatePoolAlignedWithTag(FltObjects->Instance,
+                                NonPagedPool,
+                                (SIZE_T)SizeOfBuffer,
+                                NULL);*/
+                            //Data->Iopb->Parameters.Write.WriteBuffer = ExAllocatePool(NonPagedPool, 3);
+                            //RtlCopyMemory(newBuf, EncryptedBuffer, SizeOfBuffer);
+                            Data->Iopb->Parameters.Write.WriteBuffer = EncryptedBuffer;
+                            Data->Iopb->Parameters.Write.MdlAddress = NULL;
+                            //RtlCopyMemory(Data->Iopb->Parameters.Write.WriteBuffer, EncryptedBuffer, SizeOfBuffer);
+                            Data->IoStatus.Status = STATUS_SUCCESS;
+                            Data->IoStatus.Information = SizeOfBuffer;
+                            FltSetCallbackDataDirty(Data);//A minifilter driver's preoperation or postoperation callback routine calls FltSetCallbackDataDirty to indicate that it has modified the contents of the callback data structure.
+
+                            //ExFreePool(EncryptedBuffer);
                         }
-                        KdPrint(("decrypt buffer WriteBuffer - %s\n", Data->Iopb->Parameters.Write.WriteBuffer));
+                        //((char*)Data->Iopb->Parameters.Write.WriteBuffer)[SizeOfBuffer] = 0;
+                        KdPrint(("write buffer is - \n"));
+                        PrintBuffer(Data->Iopb->Parameters.Write.WriteBuffer, Data->Iopb->Parameters.Write.Length);
+
+                        //KdPrint(("decrypt buffer WriteBuffer - %s\n", Data->Iopb->Parameters.Write.WriteBuffer));
+                        //PVOID DecryptedBuffer;
+                        //Decrypt(Data->Iopb->Parameters.Write.WriteBuffer, Data->Iopb->Parameters.Write.Length, &DecryptedBuffer, &SizeOfBuffer);
                         KdPrint(("finished\n"));
                         //KdPrint(("the write buffer is: %s\n", ioBuffer));
                     }
@@ -573,9 +596,9 @@ FLT_PREOP_CALLBACK_STATUS MiniPreWrite(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                     }
                     
 
-                    Data->IoStatus.Status = STATUS_INVALID_PARAMETER;
-                    Data->IoStatus.Information = 0;
-                    FltReleaseFileNameInformation(FileNameInfo);
+                    //Data->IoStatus.Status = STATUS_INVALID_PARAMETER;
+                   // Data->IoStatus.Information = 0;
+                    //FltReleaseFileNameInformation(FileNameInfo);
 
 
                     //return FLT_PREOP_COMPLETE; //this return status will make the Io manager to not move the irp to the lower drivers
@@ -620,7 +643,7 @@ FLT_PREOP_CALLBACK_STATUS MiniPreWrite(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
 }
 
 
-FLT_PREOP_CALLBACK_STATUS MiniPostRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
+FLT_PREOP_CALLBACK_STATUS MiniPreRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OBJECTS FltObjects, PVOID* CompletionContext)
 {
     PFLT_FILE_NAME_INFORMATION FileNameInfo;
     NTSTATUS status;
@@ -644,7 +667,7 @@ FLT_PREOP_CALLBACK_STATUS MiniPostRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                 if (wcsstr(Name, L"OPENME") != NULL)
                 {
                     KdPrint(("read file %ws\n", Name));
-                    char* ioBuffer = NULL;
+                    PVOID ioBuffer = NULL;
                     PMDL MdlAddress = Data->Iopb->Parameters.Read.MdlAddress;
                     ULONG Length = (ULONG)Data->Iopb->Parameters.Read.Length;
                     
@@ -653,20 +676,22 @@ FLT_PREOP_CALLBACK_STATUS MiniPostRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                     {
                         // Don't expect chained MDLs this high up the stack
                         ASSERT(MdlAddress->Next == NULL);
-                        ioBuffer = (char*)MmGetSystemAddressForMdlSafe(MdlAddress, NormalPagePriority);
+                        ioBuffer = MmGetSystemAddressForMdlSafe(MdlAddress, NormalPagePriority);
                         KdPrint(("read file Mdl: %s\n", ioBuffer));
                     }
                     else
                     {
-                        ioBuffer = (char*)Data->Iopb->Parameters.Read.ReadBuffer;
+                        ioBuffer = Data->Iopb->Parameters.Read.ReadBuffer;
 
                         KdPrint(("readBuffer file: %s\n", ioBuffer));
+                        KdPrint(("readBuffer length: %s\n", Data->Iopb->Parameters.Read.Length));
                     }
 
                     if (ioBuffer != NULL)
                     {
                         PVOID DecryptedBuffer;
                         ULONG SizeOfBuffer;
+                        KdPrint(("SizeOfText %lu\n", Data->Iopb->Parameters.Read.Length));
                         Decrypt(Data->Iopb->Parameters.Read.ReadBuffer, Data->Iopb->Parameters.Read.Length, &DecryptedBuffer, &SizeOfBuffer);
                         KdPrint(("decrypt buffer - %s\n", DecryptedBuffer));
                         KdPrint(("SizeOfBuffer - %lu\n", SizeOfBuffer));
@@ -676,11 +701,13 @@ FLT_PREOP_CALLBACK_STATUS MiniPostRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
                         if (DecryptedBuffer != NULL)
                         {
                             Data->Iopb->Parameters.Read.Length = SizeOfBuffer;
-                            RtlCopyMemory(Data->Iopb->Parameters.Read.ReadBuffer, DecryptedBuffer, SizeOfBuffer);
-                            ExFreePool(DecryptedBuffer);
+                            Data->Iopb->Parameters.Read.ReadBuffer = DecryptedBuffer;
+                            Data->IoStatus.Information = SizeOfBuffer;
+                            
                         }
                         KdPrint(("decrypt buffer ReadBuffer - %s\n", Data->Iopb->Parameters.Read.ReadBuffer));
                         KdPrint(("finished\n"));
+                        FltSetCallbackDataDirty(Data);
                     }
                     else {
                         KdPrint(("read buffer is null\n"));
@@ -703,41 +730,101 @@ FLT_PREOP_CALLBACK_STATUS MiniPostRead(PFLT_CALLBACK_DATA Data, PCFLT_RELATED_OB
         KdPrint(("not success read get file info 0x%x\n"));
     }
 
-    return FLT_POSTOP_FINISHED_PROCESSING;
+    return FLT_PREOP_SUCCESS_NO_CALLBACK;
 }
 
+
+ULONG AdaptDataSizeToAesBlockSize(ULONG size)
+{
+    ULONG start = 16;
+    ULONG mul= 1;
+    while (start < size)
+    {
+        start = 16 * mul;
+        mul++;
+    }
+    return start;
+}
+
+VOID PrintBuffer(PVOID buffer, int size)
+{
+    int i;
+    for (i = 0; i < size; i++)
+    {
+        
+        KdPrint(("%02X ", ((char*)buffer)[i]));
+    }
+    KdPrint(("\n"));
+}
 
 NTSTATUS Encrypt(PVOID Data,ULONG size,PVOID *EncryptedData, PULONG SizeOfBuffer)
 {
     NTSTATUS status;
     ULONG SizeOfCipherText;
-    status = BCryptEncrypt(bHandles.phKey, Data, size, NULL, NULL, 0, NULL, 0, &SizeOfCipherText, 0);
+    ULONG newSize = AdaptDataSizeToAesBlockSize(size);
+    PVOID newData = ExAllocatePool(NonPagedPool, newSize);
+    RtlZeroMemory(newData, newSize);
+    RtlCopyMemory(newData, Data, size);
+    status = BCryptEncrypt(bHandles.phKey, newData, newSize, NULL, NULL, 0, NULL, 0, &SizeOfCipherText, BCRYPT_BLOCK_PADDING);
     KdPrint(("NTSTATUS is - 0x%x\n", status));
     *EncryptedData = ExAllocatePool(NonPagedPool, SizeOfCipherText);
-    status = BCryptEncrypt(bHandles.phKey, Data, size, NULL, NULL, 0, *EncryptedData, SizeOfCipherText, &SizeOfCipherText, 0);
+    status = BCryptEncrypt(bHandles.phKey, newData, newSize, NULL, NULL, 0, *EncryptedData, SizeOfCipherText, &SizeOfCipherText, BCRYPT_BLOCK_PADDING);
     KdPrint(("NTSTATUS is - 0x%x\n", status));
-    KdPrint(("Encrypt buffer in function - %s\n", *EncryptedData));
+    KdPrint(("Encrypt buffer in function - \n"));
+    PrintBuffer(*EncryptedData, (int)SizeOfCipherText);
     *SizeOfBuffer = SizeOfCipherText;
+    //KdPrint(("Size of buffer - %lu\n", *SizeOfBuffer));
+    //KdPrint(("Size of buffer - %lu\n", SizeOfCipherText));
+    
+    
+    //PVOID DecryptBuffer;
+    //ULONG SizeOfDecryptBuffer;
+    //Decrypt(*EncryptedData, SizeOfBuffer, &DecryptBuffer, &SizeOfDecryptBuffer);
+    /*
     ULONG SizeOfPlainText;
     PVOID Data2;
-    BCryptDecrypt(bHandles.phKey, *EncryptedData, SizeOfCipherText, NULL, NULL, 0, NULL, 0, &SizeOfPlainText, 0);
+    status = BCryptDecrypt(bHandles.phKey, *EncryptedData, SizeOfCipherText, NULL, NULL, 0, NULL, 0, &SizeOfPlainText, BCRYPT_BLOCK_PADDING);
     KdPrint(("Size of plain text - %lu\n", SizeOfPlainText));
+    KdPrint(("NTSTATUS is - 0x%x\n", status));
     Data2 = ExAllocatePool(NonPagedPool, SizeOfPlainText);
-    BCryptDecrypt(bHandles.phKey, *EncryptedData, SizeOfCipherText, NULL, NULL, 0, Data2, SizeOfPlainText, &SizeOfPlainText, 0);
+    status = BCryptDecrypt(bHandles.phKey, *EncryptedData, SizeOfCipherText, NULL, NULL, 0, Data2, SizeOfPlainText, &SizeOfPlainText, BCRYPT_BLOCK_PADDING);
     KdPrint(("decrypt buffer in function - %s\n", Data2));
-    *SizeOfBuffer = SizeOfPlainText;
+    KdPrint(("NTSTATUS is - 0x%x\n", status));
+    */
+    //*SizeOfBuffer = SizeOfPlainText;
     return STATUS_SUCCESS;
 }
 
 NTSTATUS Decrypt(PVOID EncryptedData, ULONG size, PVOID *Data, PULONG SizeOfBuffer)
 {
+    NTSTATUS status;
     ULONG SizeOfPlainText;
-    BCryptDecrypt(bHandles.phKey, EncryptedData, size, NULL, NULL, 0, NULL, 0, &SizeOfPlainText, 0);
+    //PVOID Data2;
+    ULONG newSize = AdaptDataSizeToAesBlockSize(size);
+    KdPrint(("Encrypt buffer in function - \n"));
+    PrintBuffer(EncryptedData, (int)newSize);
+    status = BCryptDecrypt(bHandles.phKey, EncryptedData, newSize, NULL, NULL, 0, NULL, 0, &SizeOfPlainText, BCRYPT_BLOCK_PADDING);
     KdPrint(("Size of plain text - %lu\n", SizeOfPlainText));
+    KdPrint(("NTSTATUS is - 0x%x\n", status));
     *Data = ExAllocatePool(NonPagedPool, SizeOfPlainText);
-    BCryptDecrypt(bHandles.phKey, EncryptedData, size, NULL, NULL, 0, *Data, SizeOfPlainText, &SizeOfPlainText, 0);
+    status = BCryptDecrypt(bHandles.phKey, EncryptedData, newSize, NULL, NULL, 0, *Data, SizeOfPlainText, &SizeOfPlainText, BCRYPT_BLOCK_PADDING);
     KdPrint(("decrypt buffer in function - %s\n", *Data));
+    KdPrint(("NTSTATUS is - 0x%x\n", status));
     *SizeOfBuffer = SizeOfPlainText;
+    /*
+    NTSTATUS status;
+    ULONG SizeOfPlainText;
+    ULONG newSize = AdaptDataSizeToAesBlockSize(size);
+
+    status = BCryptDecrypt(bHandles.phKey, EncryptedData, newSize, NULL, NULL, 0, NULL, 0, &SizeOfPlainText, BCRYPT_BLOCK_PADDING);
+    KdPrint(("Size of plain text - %lu\n", SizeOfPlainText));
+    KdPrint(("NTSTATUS is - 0x%x\n", status));
+    *Data = ExAllocatePool(NonPagedPool, SizeOfPlainText);
+    status = BCryptDecrypt(bHandles.phKey, EncryptedData, newSize, NULL, NULL, 0, *Data, SizeOfPlainText, &SizeOfPlainText, BCRYPT_BLOCK_PADDING);
+    KdPrint(("decrypt buffer in function - %s\n", Data));
+    KdPrint(("NTSTATUS is - 0x%x\n", status));
+    *SizeOfBuffer = SizeOfPlainText;
+    */
     return STATUS_SUCCESS;
 }
 
@@ -746,7 +833,7 @@ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
 {
     
     NTSTATUS status;
-    KdPrint(("sdfs\n"));
+    KdPrint(("sasdcvxcvf\n"));
     
     //DRIVER_ADD_DEVICE MyAddDevice;
     //DriverObject->DriverExtension->AddDevice = MyAddDevice;
